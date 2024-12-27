@@ -6,6 +6,7 @@ import {
   addDoc,
   doc,
   updateDoc,
+  deleteDoc,
 } from "firebase/firestore";
 import Swal from "sweetalert2"; // Import SweetAlert2
 import * as XLSX from "xlsx"; // Import the xlsx library
@@ -21,6 +22,19 @@ function Tabs() {
   const [modalType, setModalType] = useState(""); // "add" or "subtract"
   const [currentItemIndex, setCurrentItemIndex] = useState(null);
   const [modalValue, setModalValue] = useState(0);
+
+  // state for edited
+  const [editingItem, setEditingItem] = useState(null);
+  const [editItemName, setEditItemName] = useState("");
+  const [editItemPrice, setEditItemPrice] = useState(0);
+  const [editItemQuantity, setEditItemQuantity] = useState(0);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showExpenseEditModal, setShowExpenseEditModal] = useState(false);
+
+  // State for editing for expenses (name and price)
+  const [editName, setEditName] = useState("");
+  const [editPrice, setEditPrice] = useState(0);
+  const [editingExpenseId, setEditingExpenseId] = useState(null);
 
   // State for add expenses modal
   const [expenseName, setExpenseName] = useState("");
@@ -132,6 +146,17 @@ function Tabs() {
     if (modalType === "add") {
       try {
         // Logic for adding a new item
+        await addDoc(collection(db, "stocks"), {
+          name: newItemName,
+          price: newItemPrice,
+          quantity: newItemQuantity,
+        });
+        Swal.fire({
+          icon: "success",
+          title: "Expense Added",
+          text: `Added ${newItemName} with price ₱${newItemPrice.toLocaleString()}.`,
+          confirmButtonText: "OK",
+        });
       } catch (error) {
         console.error("Error adding item: ", error);
       }
@@ -231,6 +256,59 @@ function Tabs() {
     );
   };
 
+  // Function to handle item deletion
+  const handleDeleteItem = async (itemId) => {
+    try {
+      // Confirm deletion using SweetAlert
+      const result = await Swal.fire({
+        title: "Are you sure?",
+        text: "You won't be able to revert this!",
+        icon: "warning",
+        showCancelButton: true,
+        confirmButtonText: "Yes, delete it!",
+        cancelButtonText: "Cancel",
+      });
+
+      if (result.isConfirmed) {
+        // Delete the item from Firestore
+        await deleteDoc(doc(db, "stocks", itemId));
+
+        // Remove the item locally to update the UI
+        setItems((prevItems) => prevItems.filter((item) => item.id !== itemId));
+
+        Swal.fire({
+          icon: "success",
+          title: "Deleted!",
+          text: "Your item has been deleted.",
+          confirmButtonText: "OK",
+        });
+      }
+    } catch (error) {
+      console.error("Error deleting item: ", error);
+      Swal.fire({
+        icon: "error",
+        title: "Error",
+        text: "Failed to delete item. Please try again.",
+        confirmButtonText: "OK",
+      });
+    }
+  };
+
+  const handleDeleteExpense = async (expenseId) => {
+    try {
+      // Delete the document from the expenses collection
+      const expenseRef = doc(db, "expenses", expenseId); // Assuming "expenses" is your collection
+      await deleteDoc(expenseRef);
+
+      // After deleting, update the UI (remove the deleted expense from the state)
+      setExpenses((prevExpenses) =>
+        prevExpenses.filter((expense) => expense.id !== expenseId)
+      );
+    } catch (error) {
+      console.error("Error deleting expense:", error);
+    }
+  };
+
   const filteredItems = items
     .filter((item) =>
       item.name.toLowerCase().includes(searchTerm.toLowerCase())
@@ -248,6 +326,84 @@ function Tabs() {
   );
 
   const totalAmount = total + expensesTotal;
+
+  const handleEditItem = (item) => {
+    setEditingItem(item);
+    setEditItemName(item.name);
+    setEditItemPrice(item.price);
+    setEditItemQuantity(item.quantity);
+    setShowEditModal(true);
+  };
+
+  const handleOpenEditModal = (expense) => {
+    setEditingExpenseId(expense.id);
+    setEditName(expense.name);
+    setEditPrice(expense.price);
+    setShowExpenseEditModal(true); // This should be tied to your modal visibility state
+  };
+
+  const handleEditExpense = async (expenseId, name, price) => {
+    try {
+      const expenseRef = doc(db, "expenses", expenseId); // Reference to the expense document
+      await updateDoc(expenseRef, {
+        name: name, // Update the name
+        price: price, // Update the price
+      });
+
+      // After updating, update the state to reflect the changes in the UI
+      setExpenses((prevExpenses) =>
+        prevExpenses.map((expense) =>
+          expense.id === expenseId ? { ...expense, name, price } : expense
+        )
+      );
+      Swal.fire({
+        icon: "success",
+        title: "Item Updated",
+        text: `${name} has been updated successfully.`,
+        confirmButtonText: "OK",
+      });
+
+      setShowExpenseEditModal(false);
+    } catch (error) {
+      console.error("Error updating expense:", error);
+    }
+  };
+
+  const handleEditSubmit = async () => {
+    if (!editingItem) return;
+
+    try {
+      const updatedItem = {
+        name: editItemName,
+        price: editItemPrice,
+        quantity: editItemQuantity,
+      };
+
+      await updateDoc(doc(db, "stocks", editingItem.id), updatedItem);
+
+      setItems((prevItems) =>
+        prevItems.map((item) =>
+          item.id === editingItem.id ? { ...item, ...updatedItem } : item
+        )
+      );
+
+      Swal.fire({
+        icon: "success",
+        title: "Item Updated",
+        text: `${editItemName} has been updated successfully.`,
+        confirmButtonText: "OK",
+      });
+      setShowEditModal(false);
+    } catch (error) {
+      console.error("Error updating item:", error);
+      Swal.fire({
+        icon: "error",
+        title: "Error",
+        text: "Failed to update item. Please try again.",
+        confirmButtonText: "OK",
+      });
+    }
+  };
 
   return (
     <div className="container mt-5">
@@ -268,8 +424,21 @@ function Tabs() {
           <strong>
             <ol>
               {expenses.map((expense) => (
-                <li key={expense.id}>
-                  {expense.name} - ₱{expense.price.toLocaleString()}
+                <li key={expense.id} className="tabs_li">
+                  {expense.name} - ₱{expense.price.toLocaleString()} &nbsp;{" "}
+                  <button
+                    className="btn btn-sm btn-primary"
+                    onClick={() => handleOpenEditModal(expense)}
+                  >
+                    <i class="fas fa-edit"></i>
+                  </button>{" "}
+                  &nbsp;
+                  <button
+                    className="btn btn-sm btn-danger"
+                    onClick={() => handleDeleteExpense(expense.id)}
+                  >
+                    <i class="fas fa-trash-alt"></i>
+                  </button>{" "}
                 </li>
               ))}
             </ol>
@@ -321,13 +490,13 @@ function Tabs() {
                     <th>Name</th>
                     <th className="text-center">Price</th>
                     <th className="text-center">Quantity</th>
-                    <th>Action</th>
+                    <th colSpan={4}>Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredItems.map((item, index) => (
                     <tr key={index}>
-                      <td>{item.name}</td>
+                      <td>{item.name} </td>
                       <td className="text-center">₱{item.price}</td>
                       <td className="text-center">{item.quantity}</td>
                       <td>
@@ -338,7 +507,7 @@ function Tabs() {
                           data-bs-toggle="modal"
                           data-bs-target="#actionModal"
                         >
-                          -
+                          <i class="fas fa-minus"></i>
                         </button>{" "}
                         <button
                           className="btn btn-sm btn-success"
@@ -346,7 +515,23 @@ function Tabs() {
                           data-bs-toggle="modal"
                           data-bs-target="#actionModal"
                         >
-                          +
+                          <i class="fas fa-plus"></i>
+                        </button>{" "}
+                        &nbsp;
+                        <button
+                          type="button"
+                          class="btn btn-sm btn-primary"
+                          onClick={() => handleEditItem(item)}
+                        >
+                          <i class="fas fa-edit"></i>
+                        </button>{" "}
+                        &nbsp;
+                        <button
+                          type="button"
+                          class="btn btn-sm btn-danger"
+                          onClick={() => handleDeleteItem(item.id)}
+                        >
+                          <i class="fas fa-trash-alt"></i>
                         </button>
                       </td>
                     </tr>
@@ -357,6 +542,136 @@ function Tabs() {
           </div>
         )}
       </div>
+
+      {/* Edit modal */}
+      <div
+        className={`modal fade ${showEditModal ? "show" : ""}`}
+        id="editModal"
+        tabIndex="-1"
+        aria-labelledby="editModalLabel"
+        aria-hidden={!showEditModal}
+        style={{ display: showEditModal ? "block" : "none" }}
+      >
+        <div className="modal-dialog">
+          <div className="modal-content">
+            <div className="modal-header">
+              <h5 className="modal-title" id="editModalLabel">
+                Edit Item
+              </h5>
+              <button
+                type="button"
+                className="btn-close"
+                data-bs-dismiss="modal"
+                aria-label="Close"
+                onClick={() => setShowEditModal(false)}
+              ></button>
+            </div>
+            <div className="modal-body">
+              <label>Name:</label>
+              <input
+                type="text"
+                className="form-control mb-3"
+                value={editItemName}
+                onChange={(e) => setEditItemName(e.target.value)}
+              />
+              <label>Price:</label>
+              <input
+                type="number"
+                className="form-control mb-3"
+                value={editItemPrice}
+                onChange={(e) => setEditItemPrice(Number(e.target.value))}
+              />
+              <label>Quantity:</label>
+              <input
+                type="number"
+                className="form-control"
+                value={editItemQuantity}
+                onChange={(e) => setEditItemQuantity(Number(e.target.value))}
+              />
+            </div>
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                data-bs-dismiss="modal"
+                onClick={() => setShowEditModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleEditSubmit}
+              >
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      {showExpenseEditModal && (
+        <div
+          className={`modal fade ${showExpenseEditModal ? "show" : ""}`}
+          id="editModal"
+          tabIndex="-1"
+          aria-labelledby="editModalLabel"
+          aria-hidden={!showExpenseEditModal}
+          style={{ display: showExpenseEditModal ? "block" : "none" }}
+        >
+          <div className="modal-dialog">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title" id="editModalLabel">
+                  Edit Expense
+                </h5>
+                <button
+                  type="button"
+                  className="btn-close"
+                  data-bs-dismiss="modal"
+                  aria-label="Close"
+                  onClick={() => setShowExpenseEditModal(false)} // Close the modal
+                ></button>
+              </div>
+              <div className="modal-body">
+                <label>Name:</label>
+                <input
+                  type="text"
+                  className="form-control mb-3"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)} // Handle name change
+                />
+                <label>Price:</label>
+                <input
+                  type="number"
+                  className="form-control"
+                  value={editPrice}
+                  onChange={(e) => setEditPrice(Number(e.target.value))} // Handle price change
+                />
+              </div>
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowExpenseEditModal(false)} // Close the modal without saving
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => {
+                    handleEditExpense(editingExpenseId, editName, editPrice);
+                    // Close the modal after saving
+                  }}
+                >
+                  Save Changes
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Add Expense Modal */}
       <div
         className="modal fade"

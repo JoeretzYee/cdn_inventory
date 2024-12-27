@@ -2,3 +2,7 @@
   max-height: 400px;
   overflow-y: auto;
 }
+
+.tabs_li {
+  margin-bottom: 20px;
+}
